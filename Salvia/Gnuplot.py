@@ -524,13 +524,6 @@ class GnuplotMultiplot():
         return (self.rcParams['max_canvas_width_px'],
                 self.rcParams['max_canvas_height_px'])
 
-        # elif self.istransposed and nx == 1:
-        #     # Extend to full canvas size if transposed and single column
-        #     x = self.rcParams['max_canvas_width_px']
-        #     y = min(self.rcParams['figure_height_px']*ny,
-        #             self.rcParams['max_canvas_height_px'])
-        # return x, y
-
 
     def compute_fig_size_cm(self):
         """
@@ -646,22 +639,6 @@ class GnuplotMultiplot():
                     invalids[pid, i] = True
         return ret, invalids
 
-
-    # def str_x_label(self, x, options=None):
-    #     if not x.visible:
-    #         return ""
-    #     options = " " + options if options else ""
-    #     off = rcParams['x_label_offset']
-    #     return "\nset xlabel \"{}\" offset screen {}, {}{}\n".format(
-    #             x.text, off[0], off[1], options)
-    #
-    # def str_y_label(self, x, options=None):
-    #     if not x.visible:
-    #         return ""
-    #     options = " " + options if options else ""
-    #     off = rcParams['y_label_offset']
-    #     return "\nset ylabel \"{}\" offset screen {}, {}{}\n".format(
-    #             x.text, off[0], off[1], options)
 
     def _repr_svg_(self):
         self.write_file()
@@ -787,39 +764,3 @@ def _label(axis, field, properties, **kwargs):
         label = properties.plot_properties.select(
             field, axis + '_label', "None")
     return label
-
-# class LableSettr():
-#
-#     def __init__(self, axis, field, figure, properties):
-#         label = kwargs.get(axis + '_label', False)
-#         if label:
-#             properties.plot_properties.insert(
-#                 field, {axis + '_label': label})
-#         else:
-#             label = properties.plot_properties.select(
-#                 field, axis + '_label', "None")
-#         setattr(figure, ax + '_label', label)
-#
-#     def _range(axis, field):
-#         Range1d = []
-#         p_range_args = kwargs.get(axis + '_range', False)
-#         if p_range_args:
-#             properties.plot_properties.insert(
-#                 field, {axis + '_range': p_range})
-#         else:
-#             p_range = properties.plot_properties.select(
-#                 field, axis + '_range')
-#         if not p_range:
-#             return False
-#         else:
-#             Range1d.append(p_range[0])
-#             Range1d.append(p_range[1])
-#             return Range1d
-#
-#     def _log(axis, field):
-#         try:
-#             p_range = properties.plot_properties.select(
-#                 field, axis + '_log')
-#             return p_range
-#         except:
-#             return False
