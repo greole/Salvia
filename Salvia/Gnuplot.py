@@ -352,7 +352,7 @@ class GnuplotFigure():
                     self.y_label.text,
                     pre_set])
 
-    def text(self, interOpts=None, finalOpts=None):
+    def ftext(self, interOpts=None, finalOpts=None):
 
         def lt(arg):
             return ("lp" if arg == "line" else "p")
@@ -371,6 +371,9 @@ class GnuplotFigure():
                    for i, _ in enumerate(self.x)]
 
         return [" ${}" + e for e in entries]
+
+    def text(self):
+        return GnuplotMultiplot([self]).text()
 
     def post_text(self):
         post_set = "".join(self.post_set)
@@ -496,19 +499,18 @@ class GnuplotMultiplot():
             x, y = self.compute_fig_size_px()
             opts = self.rcParams['svg_terminal_options']
             f.write(self.header(".svg").format(x, y, opts, fn))
-            self.write_body(self.data, f, self.n_sub_figs)
+            f.write(self.text())
 
         with open(self.filename + ".gp", 'w+') as f:
             x, y = self.compute_fig_size_cm()
             fn = os.path.basename(self.filename)
             opts = self.rcParams['eps_terminal_options']
             f.write(self.header(".eps").format(x, y, opts, fn))
-            self.write_body(self.data, f, self.n_sub_figs)
+            f.write(self.text())
 
         cmd = "cd " + os.path.dirname(self.filename) + "; gnuplot " + os.path.basename(self.filename) + "-svg.gp"
         os.system(cmd)
         os.system("cd " + os.path.dirname(self.filename) + "; gnuplot " + os.path.basename(self.filename) + ".gp")
-
 
     def compute_fig_size_px(self):
         """
@@ -568,43 +570,52 @@ class GnuplotMultiplot():
             # return "set terminal epslatex color size {}cm, 5.75cm \nset out '{}.eps'\n"
             return "set terminal epslatex size {}cm, {}cm {}\nset out '{}.eps'\n"
 
-    def write_body(self, data, f, n_sub_figs):
+    def text(self):
+        data = self.data
+        n_sub_figs = self.n_sub_figs
+        body = ""
 
-            def lt(arg):
-                return ("lp" if arg == "line" else "p")
+        def lt(arg):
+            return ("lp" if arg == "line" else "p")
 
 
-            margins = ",".join([self.rcParams["canvas_" + _ + "margin"]
-                                for _ in 'lrtb'])
+        margins = ",".join([self.rcParams["canvas_" + _ + "margin"]
+                            for _ in 'lrtb'])
 
+        body += ("set multiplot layout {}, {} margins screen {} spacing {}\n"
+            .format(
+                n_sub_figs[0], n_sub_figs[1],
+                margins, self.rcParams['spacing'])
+            )
 
-            f.write("set multiplot layout {}, {} margins screen {} spacing {}\n".format(
-                n_sub_figs[0], n_sub_figs[1], margins, self.rcParams['spacing']))
+        body += ("set border {} lw {}\n"
+            .format(
+                self.rcParams['border'],
+                self.rcParams['lw']
+            ))
 
-            f.write("set border {} lw {}\n".format(
-                    self.rcParams['border'], self.rcParams['lw']
-                ))
+        data_blocks, invalids = self.str_inline_data_blocks(data)
+        body += data_blocks
 
-            data_blocks, invalids = self.str_inline_data_blocks(data)
-            f.write(data_blocks)
+        for pid, d in data.items():
+            pid = pid.replace("(", "").replace(")", "")
 
-            for pid, d in data.items():
-                pid = pid.replace("(", "").replace(")","")
+            body += ("\nset xrange [{:.4g}: {:.4g}]\n"
+                        .format(d.xrange[0], d.xrange[1]))
+            body += ("\nset yrange [{:.4g}: {:.4g}]\n"
+                        .format(d.yrange[0], d.yrange[1]))
 
-                f.write("\nset xrange [{:.4g}: {:.4g}]\n".format(d.xrange[0], d.xrange[1]))
-                f.write("\nset yrange [{:.4g}: {:.4g}]\n".format(d.yrange[0], d.yrange[1]))
-                f.write(d.pre_text())
+            body += d.pre_text()
+            body += "\nplot "
 
-                # f.write(self.str_y_label(d.y_label))
-                f.write("\nplot ")
+            data_blocks = [e.format(pid) for e in d.ftext()]
+            s = ("".join(intersperse(", ", data_blocks)))
+            body += s
 
-                data_blocks = [e.format(pid) for e in d.text()]
+            body += d.post_text()
 
-                s = ("".join(intersperse(", ", data_blocks)))
-
-                f.write(s)
-                f.write(d.post_text())
-            f.write("\nunset multiplot")
+        body += "\nunset multiplot"
+        return body
 
     def str_inline_data_blocks(self, data):
         """  write data directly into  gnuplot script and mark invalids"""
