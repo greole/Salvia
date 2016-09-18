@@ -2,6 +2,7 @@ from collections import OrderedDict
 from itertools import cycle
 import os
 import time
+import re
 
 rcParams = {
     'colors': ['#0072bd', '#d95319', '#edb120', '#7e2f8e', '#77ac30', '#4dbeee',
@@ -16,7 +17,7 @@ rcParams = {
     'max_canvas_height_cm': 5.4,
     'svg_font': 'Arial bold',
     'border': 31,
-    'lw': 4,
+    'lw': 1,
     'lmargin': '0.1',
     'rmargin': '0.9',
     'tmargin': '0.9',
@@ -27,8 +28,8 @@ rcParams = {
     'spacing': '0.025',
     'y_label_offset': [0.0, 0],
     'x_label_offset': [0, 0],
-    'xformat': '%f',
-    'yformat': '%f',
+    'xformat': '%g',
+    'yformat': '%g',
     'num_y_tics': 3,
     'num_x_tics': 3,
     'plot_size': [],
@@ -36,7 +37,7 @@ rcParams = {
     'eps_terminal_options': 'color',
     'svg_terminal_options': '',
     'legend_position': 'top right',
-    'exp_line_width': 2,
+    'exp_line_width': 1,
 }
 
 class RcParams(dict):
@@ -381,16 +382,60 @@ class GnuplotFigure():
 
     def _repr_svg_(self):
         mP = GnuplotMultiplot([self])
+        mP.write_file()
         return mP._repr_svg_()
 
-class GnuplotMultiplot():
+class GnuplotScript():
+
+    def __init__(self, script, filename=None):
+
+        self.filename = (filename if filename else self.generateFilename())
+        self.script = script
+
+    def write_script_to_file(self, header):
+        with open(self.filename + ".gp", 'w+') as f:
+            f.write(header)
+            f.write(self.script)
+
+    def generateFilename(self):
+        return "/tmp/SalviaPlot-" + str(time.time()).split('.')[0]
+
+    def change_terminal(self, terminal, file_ext):
+        self.script = re.sub(
+            "(?<=set terminal )[A-Za-z0-9\.]+(?=\n)",
+            "set terminal " + terminal + "\n", self.script)
+
+        filename = re.findall("set output[ ]+'([A-Za-z]+)[A-Za-z.]+'\n", self.script)[0]
+        self.script = re.sub(
+            "set output[ ]+'[A-Za-z]+([A-Za-z.]+)'\n",
+            "set output '{}.{}'\n".format(filename, file_ext),
+            self.script)
+
+
+    def call_gnuplot(self):
+        cmd = "cd {}; gnuplot {}.gp".format(
+             os.path.dirname(self.filename),
+             os.path.basename(self.filename))
+        os.system(cmd)
+
+    def _repr_svg_(self):
+        self.call_gnuplot()
+        return open(self.filename + ".svg", 'r').read()
+
+def from_script(script):
+    filename = "/tmp/" + re.findall("set output[ ]+'([A-Za-z]+)[A-Za-z.]+'\n", script)[0]
+    sc = GnuplotScript(script, filename)
+    sc.write_script_to_file("")
+    return sc
+
+class GnuplotMultiplot(GnuplotScript):
     # data is a OrderedDict of the form
     # {"id": [ GnuplotDataSet  ]}
     # self.data = OrderedDict()
     def __init__(self, data, filename=None, **kwargs):
         """ write gnuplot script given a list of gnuplot figures and a filename """
 
-        self.filename = (filename if filename else self.generateFilename())
+        super(GnuplotMultiplot, self).__init__("", filename)
         self.rcParams = RcParams(kwargs.get("rcParams", dict()))
 
         if isinstance(data, list):
@@ -406,10 +451,9 @@ class GnuplotMultiplot():
 
         # TODO refactor this
         # set canvas references
-
         self.style = kwargs.get("style", False)
 
-        self.write_file()
+        # self.write_file()
 
     def set_canvas(self):
         for _, fig in self.data.items():
@@ -494,23 +538,20 @@ class GnuplotMultiplot():
         if self.style:
             self.style(self)
 
-        with open(self.filename + "-svg.gp", 'w+') as f:
-            fn = os.path.basename(self.filename)
-            x, y = self.compute_fig_size_px()
-            opts = self.rcParams['svg_terminal_options']
-            f.write(self.header(".svg").format(x, y, opts, fn))
-            f.write(self.text())
+        # with open(self.filename + "-svg.gp", 'w+') as f:
+        fn = os.path.basename(self.filename)
+        x, y = self.compute_fig_size_px()
+        opts = self.rcParams['svg_terminal_options']
+        self.script = self.text()
+        self.write_script_to_file(self.header(".svg").format(x, y, opts, fn))
+        self.call_gnuplot()
 
-        with open(self.filename + ".gp", 'w+') as f:
-            x, y = self.compute_fig_size_cm()
-            fn = os.path.basename(self.filename)
-            opts = self.rcParams['eps_terminal_options']
-            f.write(self.header(".eps").format(x, y, opts, fn))
-            f.write(self.text())
-
-        cmd = "cd " + os.path.dirname(self.filename) + "; gnuplot " + os.path.basename(self.filename) + "-svg.gp"
-        os.system(cmd)
-        os.system("cd " + os.path.dirname(self.filename) + "; gnuplot " + os.path.basename(self.filename) + ".gp")
+        # Export to eps
+        x, y = self.compute_fig_size_cm()
+        fn = os.path.basename(self.filename)
+        opts = self.rcParams['eps_terminal_options']
+        self.write_script_to_file(self.header(".eps").format(x, y, opts, fn))
+        self.call_gnuplot()
 
     def compute_fig_size_px(self):
         """
@@ -551,9 +592,6 @@ class GnuplotMultiplot():
         else:
             self.istransposed = False
 
-
-    def generateFilename(self):
-        return "/tmp/SalviaPlot-" + str(time.time()).split('.')[0]
 
     def header(self, ext):
         if ext == ".svg":
@@ -640,9 +678,9 @@ class GnuplotMultiplot():
         return ret, invalids
 
 
-    def _repr_svg_(self):
-        self.write_file()
-        return open(self.filename + ".svg", 'r').read()
+    # def _repr_svg_(self):
+    #     self.write_file()
+    #     return open(self.filename + ".svg", 'r').read()
 
 # example colors
 # https://www2.uni-hamburg.de/Wiss/FB/15/Sustainability/schneider/gnuplot/colors.htm
