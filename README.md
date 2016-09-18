@@ -2,8 +2,18 @@
 
 a python gnuplot 5 wrapper
 
-create a figure
-from Salvia import Gnuplot
+# Installation
 
-Gnuplot.draw(x="Position", y="Temperature", data=df, func="line")
-Gnuplot.Gridplot([f], "filename", show=True, style=lambda x:x)
+    python setup.py install
+
+# Usage
+~~~~
+    import pandas as pd
+    import numpy as np
+    from Salvia import Gnuplot
+
+    df = pd.DataFrame(np.random.randn(10, 4), columns=list('ABCD'))
+
+    Gnuplot.draw(x="A", y=["B","C"], data=df, func="scatter")
+~~~~
+
