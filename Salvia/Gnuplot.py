@@ -252,6 +252,8 @@ class GnuplotFigure():
 
         self.canvas = kwargs.get("canvas", None)
 
+        self.filename = kwargs.get("filename", None)
+
         self.lt = Line(self.canvas)
 
         self.x_label = Label("x", kwargs.get("xlabel", "None"), self.canvas)
@@ -374,14 +376,14 @@ class GnuplotFigure():
         return [" ${}" + e for e in entries]
 
     def text(self):
-        return GnuplotMultiplot([self]).text()
+        return GnuplotMultiplot([self], filename=self.filename).text()
 
     def post_text(self):
         post_set = "".join(self.post_set)
         return post_set
 
     def _repr_svg_(self):
-        mP = GnuplotMultiplot([self])
+        mP = GnuplotMultiplot([self], filename=self.filename)
         mP.write_file()
         return mP._repr_svg_()
 
@@ -740,7 +742,7 @@ def draw(x, y, data, title=None, func="line",
     """
     pP = kwargs.get('properties', Props())
 
-    figure = figure if figure else GnuplotFigure()
+    figure = figure if figure else GnuplotFigure(filename=kwargs.get("filename", None))
     y = (y if isinstance(y, list) else [y])
     for yi in y:
         x_data, y_data = data[x], data[yi]
