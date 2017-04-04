@@ -46,6 +46,30 @@ class CleanAxis(Styler):
         setattr(_label, "name", "")
         setattr(_label, "exp_format", "")
 
+
+class MirrorAxis(Styler):
+
+    def __init__(self, name, slyce=None, prev=None):
+        self.name = name
+        Styler.__init__(self, func=self.func, slyce=slyce, prev=prev)
+
+    def func(self, figure):
+        _label = getattr(figure, self.name + "_label")
+        setattr(_label, "visible", False)
+        _label = getattr(figure, self.name + "2_label")
+        setattr(_label, "visible", True)
+
+class ReverseRange(Styler):
+
+    def __init__(self, name, slyce=None, prev=None):
+        self.name = name
+        Styler.__init__(self, func=self.func, slyce=slyce, prev=prev)
+
+    def func(self, figure):
+        label = self.name + "_range"
+        upr, lowr = getattr(figure, label)
+        setattr(figure, label, [lowr, upr])
+
 class Legend(Styler):
 
     def __init__(self, pos, slyce=None, prev=None):
@@ -55,6 +79,30 @@ class Legend(Styler):
     def func(self, figure):
         obj = getattr(figure, "legend")
         setattr(obj, "orientation", self.pos)
+
+class LineAttr(Styler):
+
+    def __init__(self, colorMap, attr, slyce=None, prev=None):
+        self.cMap = colorMap
+        self.attr = attr
+        Styler.__init__(self, func=self.func, slyce=slyce, prev=prev)
+
+    def func(self, figure):
+        obj = getattr(figure, "legend")
+        names = getattr(obj, "legends")
+        line = getattr(figure, "lt")
+        origPt = getattr(line, self.attr)
+        origPt = [1 for n in names]
+
+        if isinstance(self.cMap, dict):
+            for case, color in self.cMap.items():
+                index = names.index(case)
+                origPt[index] = color
+        else:
+            origPt = self.cMap
+
+        setattr(line, self.attr, origPt)
+
 
 class CleanColormaps(Styler):
 
