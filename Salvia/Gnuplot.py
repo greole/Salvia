@@ -1,12 +1,34 @@
 from collections import OrderedDict
+import subprocess
 from itertools import cycle
 import os
 import time
 import re
 
+NumberTypes = (int, float, complex)
+
+color_palette=[
+    # '#0000ff', # blue
+    # '#007f00', # green
+    # '#ff0000', # red
+    # '#00bfbf', # cyan
+    # '#bf00bf', # pink
+    # #'#bfbf00,  # yellow
+    # '#3f3f3f', # black]
+'#000080',# blue
+#'#0000ff',#
+'#ff0000',# red
+'#007f00', # green
+'#ff8000',# orange
+#'#800000',# brown
+'#0080ff',# light blue
+# '#ffff00',#
+#'#80ff80',#
+#'#00ffff',#
+    ]
+
 rcParams = {
-    'colors': ['#0072bd', '#d95319', '#edb120', '#7e2f8e', '#77ac30', '#4dbeee',
-                '#a2142f'],
+    'colors': color_palette,
     'figure_width_px': 255,
     'figure_height_px': 255,
     'figure_width_cm': 5.75,
@@ -27,11 +49,15 @@ rcParams = {
     'canvas_tmargin': '1.0',
     'spacing': '0.025',
     'y_label_offset': [0.0, 0],
+    'y2_label_offset': [0.0, 0],
     'x_label_offset': [0, 0],
     'xformat': '%g',
     'yformat': '%g',
+    'y2format': '%g',
     'num_y_tics': 3,
+    'num_y2_tics': 3,
     'num_x_tics': 3,
+    'num_x2_tics': 3,
     'plot_size': [],
     'plot_ratio': 1.0,
     'eps_terminal_options': 'color',
@@ -49,13 +75,48 @@ class RcParams(dict):
         else:
             return rcParams.get(key, None)
 
-class Label():
 
-    def __init__(self, axis, text, canvas=None):
+class PlotProperty():
+    """ Base class holding properties of a plot which
+        are usually specified by set and unset commands """
+
+    @property
+    def text(self):
+        pass
+
+    @property
+    def post_text(self):
+        pass
+
+
+class Grid(PlotProperty):
+
+    def __init__(self, canvas=None, visible=True):
+        self.visible = visible
+
+    @property
+    def text(self):
+        if self.visible:
+            return "set grid\n"
+        else:
+            return ""
+
+    @property
+    def post_text(self):
+        if self.visible:
+            return "unset grid\n"
+        else:
+            return ""
+
+
+class Label(PlotProperty):
+
+    def __init__(self, axis, text, canvas=None, visible=True):
         self.axis = axis
+        self.axis_normalised = axis.replace("2", "")
         self.name = text
         self.canvas = canvas
-        self.visible = True
+        self.visible = visible
         self.exp_format = None
         self.exp_offset = None
         self.exp_tics  = None
@@ -98,10 +159,13 @@ class Label():
             val = self.canvas._tics(self.axis)
         else:
             val = rcParams["num_{}_tics".format(self.axis)]
-        if not _range[0] or not _range[1]:
+        if (not isinstance(_range[0], NumberTypes)
+            or not isinstance(_range[1], NumberTypes)):
             return ""
-        tics = (_range[1] - _range[0])/val
-        return "set {}tics {}\n".format(self.axis, tics)
+        l = _range[0]
+        u = _range[1]
+        tics = abs((u - l)/val)
+        return "set {}tics {}, {}, {}\n".format(self.axis, min(l,u), tics, 0.9*max(l,u))
 
     @property
     def text(self):
@@ -112,8 +176,15 @@ class Label():
         return pre + "set {}label \"{}\" offset screen {}, {}\n".format(
                 self.axis, self.name, off[0], off[1])
 
+    @property
+    def post_text(self):
+        if self.visible:
+            return 'set {}label ""\n'.format(self.axis)
+        else:
+            return ""
 
-class Size():
+
+class Size(PlotProperty):
 
     def __init__(self, ratio=None, size=None, canvas=None):
         self.exp_ratio = ratio
@@ -151,71 +222,8 @@ class Size():
         return "set size ratio {} {}\n".format(
                 self.ratio, " ".join(map(str, self.size)))
 
-class Line():
 
-    def __init__(self, canvas=None):
-        self.exp_withs = [] # line or points
-        self.exp_line_types = None
-        self.exp_line_color = None
-        self.exp_line_width = None
-        self.exp_dashtype = None
-        self.exp_pointtype = None
-        self.ctr = self.gen()
-        self.canvas = canvas
-
-    def get(self, i, palette):
-        return (self._with(i, palette)
-                + self._line_width(i)
-                + self._pointtype(i)
-                + self._dashtype(i))
-
-    def _prop(self, name, i):
-        prop = getattr(self, name)
-        if isinstance(prop, list) and prop[i]:
-            val = prop[i]
-            val = val if val != "quad" else "line"
-            val = val if val != "scatter" else "points"
-        elif isinstance(prop, str):
-            val = prop
-        elif self.canvas:
-            val = self.canvas.rcParams[name]
-        else:
-            val = rcParams.get(name, False)
-        return val
-
-    def _with(self, i, palette):
-        return " w " + self._prop("exp_withs", i) + palette
-
-    def gen(self):
-        for i in cycle(range(40)):
-            yield i
-
-    def _color(self, i):
-        val = self._prop("exp_color", i)
-        return val if val else str(self.gen())
-
-    def _line_width(self, i):
-        return " lw " + str(self._prop("exp_line_width", i))
-
-    def _dashtype(self, i):
-        prop = self._prop("exp_dashtype", i)
-        prop = prop if prop else str(next(self.ctr) + 1)
-        val = " dt " + prop
-        return val
-
-    def _pointtype(self, i):
-        prop = self._prop("exp_pointtype", i)
-        prop = prop if prop else str(next(self.ctr) + 1)
-        val = " pt " + prop
-        return val
-
-
-    def append(self, lt):
-        self.exp_withs.append(lt)
-
-
-
-class Legend():
+class Legend(PlotProperty):
 
     def __init__(self, orientation=None, canvas=None):
         self.visible = True
@@ -237,7 +245,104 @@ class Legend():
         return t.format(val)
 
     def __getitem__(self, i):
-        return  self.legends[i]
+        return self.legends[i]
+
+
+class TextLabels(list):
+
+    @property
+    def text(self):
+        o = ""
+        for i, t in enumerate(self):
+            o += "set label {} {}\n".format(i+1, t)
+        return o
+
+    @property
+    def post_text(self):
+        o = ""
+        for i, t in enumerate(self):
+            o += "unset label {}\n".format(i+1)
+        return o
+
+
+class Line():
+
+    def __init__(self, canvas=None):
+        self.exp_withs = [] # line or points
+        self.exp_line_types = None
+        self.exp_line_color = []
+        self.exp_line_width = None
+        self.exp_dashtype = None
+        self.exp_pointtype = None
+        self.ctr = self.gen()
+        self.canvas = canvas
+
+    def get(self, i, palette):
+        return "w {wt} pt {pt} dt {dt} lw {lw} {lc}".format(
+                wt=self._with(i, palette),
+                lw=self._line_width(i),
+                pt=self._pointtype(i),
+                dt=self._dashtype(i),
+                lc=self._color(i, palette))
+
+    def _prop(self, name, i):
+        prop = getattr(self, name)
+        if isinstance(prop, list) and prop[i]:
+            val = prop[i]
+            val = val if val != "quad" else "line"
+            val = val if val != "scatter" else "points"
+        elif isinstance(prop, str):
+            val = prop
+        elif self.canvas:
+            val = self.canvas.rcParams[name]
+        else:
+            val = rcParams.get(name, False)
+        return val
+
+    def _with(self, i, palette):
+        return self._prop("exp_withs", i) + palette
+
+    def gen(self):
+        l = []
+        for i in range(40):
+            for _ in range(3):
+                l.append(i)
+        for i in cycle(l):
+            yield i
+
+    def _color(self, i, palette=False):
+        if palette:
+            return ""
+        val = self.exp_line_color[i]  #False #self._prop("exp_color", i)
+        colors = rcParams["colors"]
+        num_cols = len(colors)
+        index = val
+        if not val:
+            index = int(next(self.ctr)) % num_cols
+        elif isinstance(val, int):
+            index = val
+            val = False
+        ret = val if val else colors[index]
+        return "lc rgb '" + ret + "'"
+
+    def _line_width(self, i):
+        return str(self._prop("exp_line_width", i))
+
+    def _dashtype(self, i):
+        prop = self._prop("exp_dashtype", i)
+        index = int(next(self.ctr))
+        prop = prop if prop else str(index+ 1)
+        return prop
+
+    def _pointtype(self, i):
+        prop = self._prop("exp_pointtype", i)
+        index = int(next(self.ctr))
+        prop = prop if prop else str(index + 1)
+        return prop
+
+    def append(self, lt, exp_color=False):
+        self.exp_withs.append(lt)
+        self.exp_line_color.append(exp_color)
 
 
 class GnuplotFigure():
@@ -256,9 +361,16 @@ class GnuplotFigure():
 
         self.lt = Line(self.canvas)
 
+        # self.labels = TextLabels()
+        self.labels = TextLabels()
+
         self.x_label = Label("x", kwargs.get("xlabel", "None"), self.canvas)
+        self.x2_label = Label("x2", kwargs.get("xlabel", "None"), self.canvas)
 
         self.y_label = Label("y", kwargs.get("ylabel", "None"), self.canvas)
+        self.y2_label = Label("y2",
+                kwargs.get("y2label", "None"),
+                self.canvas, visible=False)
 
         self.size = Size(
                 kwargs.get("ratio", None),
@@ -266,10 +378,14 @@ class GnuplotFigure():
                 self.canvas)
 
         self.x_range = [None, None]
+        self.x2_range = [None, None]
         self.x_log = False
 
         self.y_range = [None, None]
+        self.y2_range = [None, None]
         self.y_log = False
+
+        self.grid = Grid(self.canvas, visible=True)
 
         # http://stackoverflow.com/questions/2827623
         self.legend = Legend()
@@ -277,6 +393,15 @@ class GnuplotFigure():
         self.title = "TEST"
         self.pre_set = []
         self.post_set = []
+
+    def insert(self, f2):
+        for i in range(len(f2.x)):
+            self.legend.legends.append(f2.legend.legends[i])
+            self.x.append(f2.x[i])
+            self.y.append(f2.y[i])
+            self.z.append(f2.z[i])
+            self.lt.append(f2.lt.exp_withs[i])
+        return self
 
     def add(self, x, y, legend, lt, z=None, plotProperties=None):
         self.legend.legends.append(legend)
@@ -327,8 +452,8 @@ class GnuplotFigure():
         else:
             minys = [min_(y) for y in self.y]
             maxys = [max_(y) for y in self.y]
-            return [min([y for y in minys if y]),
-                    max([y for y in maxys if y])]
+            return [min([y for y in minys if isinstance(y, NumberTypes)]),
+                    max([y for y in maxys if isinstance(y, NumberTypes)])]
 
     def set(self, opts, undo=True):
         self.pre_set.append("set " + opts + "\n")
@@ -349,10 +474,14 @@ class GnuplotFigure():
         return "".join([
                     self.size.text,
                     self.legend.text,
+                    self.labels.text,
                     self.x_label.tics(self.x_range),
                     self.y_label.tics(self.y_range),
+                    self.y2_label.tics(self.y_range),
                     self.x_label.text,
                     self.y_label.text,
+                    self.y2_label.text,
+                    self.grid.text,
                     pre_set])
 
     def ftext(self, interOpts=None, finalOpts=None):
@@ -361,7 +490,10 @@ class GnuplotFigure():
             return ("lp" if arg == "line" else "p")
 
         def dist(i):
-            return int(len(self.x[i])/10)
+            try:
+                return int(len(self.x[i])/10)
+            except:
+                return 1
 
         palette = lambda i: "" if isinstance(self.z[i], type(None)) else " palette"
         # entries = ["_{} title '{}' w {} {} pt {} pi {} lw {} dashtype {}".format(
@@ -380,7 +512,17 @@ class GnuplotFigure():
 
     def post_text(self):
         post_set = "".join(self.post_set)
-        return post_set
+        return "".join([
+                    post_set,
+                    "\n",
+                    self.labels.post_text,
+                    self.y_label.post_text,
+                    self.y2_label.post_text,
+                    self.x_label.post_text,
+                    self.x2_label.post_text,
+                    self.grid.post_text,
+                    "\nunset xtics",
+                    "\nunset ytics\n"])
 
     def _repr_svg_(self):
         mP = GnuplotMultiplot([self], filename=self.filename)
@@ -415,10 +557,16 @@ class GnuplotScript():
 
 
     def call_gnuplot(self):
-        cmd = "cd {}; gnuplot {}.gp".format(
-             os.path.dirname(self.filename),
-             os.path.basename(self.filename))
-        os.system(cmd)
+        cmd = "{}.gp".format(os.path.basename(self.filename))
+        cwd = os.path.dirname(self.filename)
+        if cwd == '':
+            cwd = './'
+        try:
+            self.gnuplot_output = subprocess.check_output(["gnuplot", cmd],
+                    cwd=cwd, stderr=subprocess.PIPE)
+        except Exception as e:
+            print("cmd gnuplot {} in {} failed ".format(cmd,cwd))
+            print(e)
 
     def _repr_svg_(self):
         self.call_gnuplot()
@@ -455,12 +603,10 @@ class GnuplotMultiplot(GnuplotScript):
         # set canvas references
         self.style = kwargs.get("style", False)
 
-        # self.write_file()
-
     def set_canvas(self):
         for _, fig in self.data.items():
             setattr(fig, "canvas", self)
-            for name in ["size", "x_label", "y_label", "legend", "lt"]:
+            for name in ["size", "x_label", "y_label", "y2_label", "legend", "lt"]:
                 attr = getattr(fig, name)
                 setattr(attr, "canvas", self)
 
@@ -487,8 +633,18 @@ class GnuplotMultiplot(GnuplotScript):
         else:
             return x, y
 
+    def insert(self, m2):
+        own_keys = list(self.data.keys())
+        rem_keys = list(m2.data.keys())
+        for i, (k, d) in enumerate(m2.data.items()):
+            self.data[own_keys[i]].insert(d)
 
-
+    def intersperse(self, m2):
+        dataOD = OrderedDict()
+        for ((k1, d1), (k2, d2)) in zip(m2.data.items(), self.data.items()):
+            dataOD.update({k2+"1": d2})
+            dataOD.update({k1+"2": d1})
+        return GnuplotMultiplot(dataOD, self.filename)
 
     @property
     def plot_size(self):
@@ -516,6 +672,11 @@ class GnuplotMultiplot(GnuplotScript):
             l = getattr(f, "legend")
             setattr(l, "legends", legends)
 
+    def update_legends_orientation(self, orientation):
+        for i, f in self.data.items():
+            l = getattr(f, "legend")
+            setattr(l, "orientation", orientation)
+
     def update_labels(self, axis, prop, labels):
         for i, (_, f) in enumerate(self.data.items()):
             l = getattr(f, axis  + "_label")
@@ -531,6 +692,10 @@ class GnuplotMultiplot(GnuplotScript):
         for i, (_, f) in enumerate(self.data.items()):
             l = getattr(f, name)
             setattr(l, "visible", vis_map[i])
+
+    def _repr_svg_(self):
+        self.write_file()
+        return super(GnuplotMultiplot, self)._repr_svg_()
 
 
     def write_file(self):
@@ -636,6 +801,9 @@ class GnuplotMultiplot(GnuplotScript):
             body += ("\nset xrange [{:.4g}: {:.4g}]\n"
                         .format(d.xrange[0], d.xrange[1]))
             body += ("\nset yrange [{:.4g}: {:.4g}]\n"
+                        .format(d.yrange[0], d.yrange[1]))
+
+            body += ("\nset y2range [{:.4g}: {:.4g}]\n"
                         .format(d.yrange[0], d.yrange[1]))
 
             body += d.pre_text()
@@ -769,9 +937,12 @@ def draw(x, y, data, title=None, func="line",
         if label:
             l = getattr(figure, ax+'_label')
             setattr(l, "name", label)
+            l = getattr(figure, ax+'2_label')
+            setattr(l, "name", label)
         range_ = _range(ax, data_set, pP)
         if range_:
             setattr(figure, ax+'_range', range_)
+            setattr(figure, ax+'2_range', range_)
         # if _log(ax, data_set):
         #     r = setattr(figure, ax+'_log', _log(ax, data_set))
     return figure
@@ -796,11 +967,12 @@ def _range(axis, field, properties, **kwargs):
 
 def _label(axis, field, properties, **kwargs):
     # Explicit Label
-    label = kwargs.get(axis + '_label', False)
+    axis_label = (axis + '_label').replace("2", "")
+    label = kwargs.get(axis_label, False)
     if label:
         properties.plot_properties.insert(
-            field, {axis + '_label': label})
+            field, {axis_label: label})
     else:
         label = properties.plot_properties.select(
-            field, axis + '_label', "None")
+            field, axis_label, "None")
     return label
