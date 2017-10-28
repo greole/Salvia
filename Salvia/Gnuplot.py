@@ -599,6 +599,7 @@ class GnuplotMultiplot(GnuplotScript):
         self.istransposed = kwargs.get("transposed", False)
         self.flat = kwargs.get("flattened", False)
 
+        self.set_style = None
         # TODO refactor this
         # set canvas references
         self.style = kwargs.get("style", False)
@@ -786,6 +787,11 @@ class GnuplotMultiplot(GnuplotScript):
                 margins, self.rcParams['spacing'])
             )
 
+        # write set style header
+        if self.set_style:
+            for elem in self.set_style:
+                body += "set style {}\n".format(elem)
+
         body += ("set border {} lw {}\n"
             .format(
                 self.rcParams['border'],
@@ -810,7 +816,7 @@ class GnuplotMultiplot(GnuplotScript):
             body += "\nplot "
 
             data_blocks = [e.format(pid) for e in d.ftext()]
-            s = ("".join(intersperse(", ", data_blocks)))
+            s = ("".join(intersperse(", \\\n", data_blocks)))
             body += s
 
             body += d.post_text()
