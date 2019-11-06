@@ -4,10 +4,13 @@ from itertools import cycle
 import os
 import time
 import re
+from binascii import b2a_hex, b2a_base64, hexlify
+
+
 
 NumberTypes = (int, float, complex)
 
-color_palette=[
+color_palette = [
     # '#0000ff', # blue
     # '#007f00', # green
     # '#ff0000', # red
@@ -15,16 +18,35 @@ color_palette=[
     # '#bf00bf', # pink
     # #'#bfbf00,  # yellow
     # '#3f3f3f', # black]
-'#000080',# blue
-#'#0000ff',#
-'#ff0000',# red
-'#007f00', # green
-'#ff8000',# orange
-#'#800000',# brown
-'#0080ff',# light blue
-# '#ffff00',#
-#'#80ff80',#
-#'#00ffff',#
+     '#000080',  # blue
+     '#ff0000',  # red
+     '#ff8000',  # orange
+     '#000000',  # black
+     '#88dd88',  # light green
+     '#7e2f8e',  # purple
+     '#ff8080',  # lighter red
+     # '#ffbf80', # lighter orange
+
+     '#000000',  # black
+     '#88dd88',  # light green
+     '#4dbeee',  # light-blue
+     "#48D1CC",  # light green
+
+     '#ff8080',  # lighter red
+     '#4242d7',  # lighter blue
+     '#0080ff',  # light blue
+     "#98FB98",
+     # '#d95319', # orange
+       # '#FF4500',# brown
+     # '#77ac30', # green
+    #'#0000ff',#
+    #'#007f00', # green
+    # '#ffff00',#
+    #'#80ff80',#
+    #'#00ffff',#
+#  '#0072bd', # blue
+#  '#edb120', # yellow
+#  '#a2142f', # red
     ]
 
 rcParams = {
@@ -62,6 +84,7 @@ rcParams = {
     'plot_ratio': 1.0,
     'eps_terminal_options': 'color',
     'svg_terminal_options': '',
+    'png_terminal_options': '',
     'legend_position': 'top right',
     'exp_line_width': 1,
 }
@@ -111,7 +134,7 @@ class Grid(PlotProperty):
 
 class Label(PlotProperty):
 
-    def __init__(self, axis, text, canvas=None, visible=True):
+    def __init__(self, axis, text, svg, canvas=None, visible=True):
         self.axis = axis
         self.axis_normalised = axis.replace("2", "")
         self.name = text
@@ -120,6 +143,7 @@ class Label(PlotProperty):
         self.exp_format = None
         self.exp_offset = None
         self.exp_tics  = None
+        self.svg = svg
 
     @property
     def _format(self):
@@ -167,14 +191,20 @@ class Label(PlotProperty):
         tics = abs((u - l)/val)
         return "set {}tics {}, {}, {}\n".format(self.axis, min(l,u), tics, 0.9*max(l,u))
 
-    @property
-    def text(self):
+    def text(self, svg):
         if not self.visible:
             return 'set format {} ""\n'.format(self.axis)
         off = self._offs
         pre = self._format
+        # TODO clean latex commands from text if in svg mode
+        if svg:
+            name = self.name.replace("$", "")
+            name = name.replace("overline", "")
+        else:
+            name = self.name.replace("\\", "\\\\")
+            name = "\\\\shortstack{" + name + "}"
         return pre + "set {}label \"{}\" offset screen {}, {}\n".format(
-                self.axis, self.name, off[0], off[1])
+                self.axis, name, off[0], off[1])
 
     @property
     def post_text(self):
@@ -303,12 +333,26 @@ class Line():
         return self._prop("exp_withs", i) + palette
 
     def gen(self):
-        l = []
-        for i in range(40):
-            for _ in range(3):
-                l.append(i)
-        for i in cycle(l):
-            yield i
+        # l = []
+        # for i in range(40):
+        #      for _ in range(3):
+        #         l.append(i)
+        # for i in cycle(l):
+        #     yield i
+        # NOTE this counter is called several times per figure
+        # e.g. for line color, point and dash types
+         def init():
+             return 0
+         i = init()
+         while True:
+             for _ in range(3):
+                 val = (yield i)
+             if val=='restart':
+                 print("DEBUG gen reset")
+                 i = 0 # init()
+             else:
+                 # print("DEBUG ctr incr", i)
+                 i += 1
 
     def _color(self, i, palette=False):
         if palette:
@@ -350,6 +394,7 @@ class GnuplotFigure():
     def __init__(self, **kwargs):
 
         self.rcParams = RcParams(kwargs.get("rcParams", dict()))
+        self.svg = False
 
         self.x = []
         self.y = []
@@ -364,13 +409,13 @@ class GnuplotFigure():
         # self.labels = TextLabels()
         self.labels = TextLabels()
 
-        self.x_label = Label("x", kwargs.get("xlabel", "None"), self.canvas)
-        self.x2_label = Label("x2", kwargs.get("xlabel", "None"), self.canvas)
+        self.x_label = Label("x", kwargs.get("xlabel", "None"), self.svg, self.canvas)
+        self.x2_label = Label("x2", kwargs.get("xlabel", "None"), self.svg, self.canvas)
 
-        self.y_label = Label("y", kwargs.get("ylabel", "None"), self.canvas)
+        self.y_label = Label("y", kwargs.get("ylabel", "None"), self.svg, self.canvas)
         self.y2_label = Label("y2",
                 kwargs.get("y2label", "None"),
-                self.canvas, visible=False)
+                self.svg, self.canvas, visible=False)
 
         self.size = Size(
                 kwargs.get("ratio", None),
@@ -393,6 +438,12 @@ class GnuplotFigure():
         self.title = "TEST"
         self.pre_set = []
         self.post_set = []
+
+    def reset_ctr(self):
+        #TODO FIXME
+        # print("DEBUG ctr reset")
+        self.lt.ctr.send("restart")
+
 
     def insert(self, f2):
         for i in range(len(f2.x)):
@@ -466,7 +517,8 @@ class GnuplotFigure():
             self.post_set.append("set " + opts + "\n")
 
 
-    def pre_text(self):
+    def pre_text(self, svg):
+        self.svg = svg
 
         # TODO use pre_set more extensivly
         pre_set = "".join(self.pre_set)
@@ -478,9 +530,9 @@ class GnuplotFigure():
                     self.x_label.tics(self.x_range),
                     self.y_label.tics(self.y_range),
                     self.y2_label.tics(self.y_range),
-                    self.x_label.text,
-                    self.y_label.text,
-                    self.y2_label.text,
+                    self.x_label.text(svg),
+                    self.y_label.text(svg),
+                    self.y2_label.text(svg),
                     self.grid.text,
                     pre_set])
 
@@ -508,6 +560,7 @@ class GnuplotFigure():
         return [" ${}" + e for e in entries]
 
     def text(self):
+        self.reset_ctr()
         return GnuplotMultiplot([self], filename=self.filename).text()
 
     def post_text(self):
@@ -524,10 +577,18 @@ class GnuplotFigure():
                     "\nunset xtics",
                     "\nunset ytics\n"])
 
-    def _repr_svg_(self):
+    #def _repr_svg_(self):
+    #    self.reset_ctr()
+    #    mP = GnuplotMultiplot([self], filename=self.filename)
+    #    mP.write_file()
+    #    return mP._repr_svg_()
+
+    def _repr_png_(self):
+        self.reset_ctr()
         mP = GnuplotMultiplot([self], filename=self.filename)
         mP.write_file()
-        return mP._repr_svg_()
+        return mP._repr_png_()
+
 
 class GnuplotScript():
 
@@ -535,9 +596,10 @@ class GnuplotScript():
 
         self.filename = (filename if filename else self.generateFilename())
         self.script = script
+        self.svg=False
 
-    def write_script_to_file(self, header):
-        with open(self.filename + ".gp", 'w+') as f:
+    def write_script_to_file(self, header, ext=".gp"):
+        with open(self.filename + ext, 'w+') as f:
             f.write(header)
             f.write(self.script)
 
@@ -556,8 +618,9 @@ class GnuplotScript():
             self.script)
 
 
-    def call_gnuplot(self):
-        cmd = "{}.gp".format(os.path.basename(self.filename))
+    def call_gnuplot(self, svg=False, ext="_eps.gp"):
+        self.svg = svg
+        cmd = "{}".format(os.path.basename(self.filename)) + ext
         cwd = os.path.dirname(self.filename)
         if cwd == '':
             cwd = './'
@@ -568,9 +631,18 @@ class GnuplotScript():
             print("cmd gnuplot {} in {} failed ".format(cmd,cwd))
             print(e)
 
-    def _repr_svg_(self):
-        self.call_gnuplot()
-        return open(self.filename + ".svg", 'r').read()
+    #def _repr_svg_(self):
+    #    self.call_gnuplot(svg=True, ext="_svg.gp")
+    #    print("Displaying file: {}{}".format(self.filename, ".svg"))
+    #    return open(self.filename + ".svg", 'r').read()
+
+    def _repr_png_(self):
+        self.call_gnuplot(svg=True, ext="_png.gp")
+        fn = "{}{}".format(self.filename, ".png")
+        print("Displaying file: " + fn)
+        data = b2a_base64(open(fn, 'rb').read()).decode("ascii").replace("\n","")
+        return data
+
 
 def from_script(script):
     filename = "/tmp/" + re.findall("set output[ ]+'([A-Za-z]+)[A-Za-z.]+'\n", script)[0]
@@ -587,6 +659,7 @@ class GnuplotMultiplot(GnuplotScript):
 
         super(GnuplotMultiplot, self).__init__("", filename)
         self.rcParams = RcParams(kwargs.get("rcParams", dict()))
+        self.title = False
 
         if isinstance(data, list):
             dataOD = OrderedDict()
@@ -604,6 +677,11 @@ class GnuplotMultiplot(GnuplotScript):
         # set canvas references
         self.style = kwargs.get("style", False)
 
+    def reset_ctrs(self):
+        # TODO FIXME
+        for _, fig in self.data.items():
+            fig.reset_ctr()
+
     def set_canvas(self):
         for _, fig in self.data.items():
             setattr(fig, "canvas", self)
@@ -619,6 +697,11 @@ class GnuplotMultiplot(GnuplotScript):
 
     def get(self, key):
         return self.data.get(key, GnuplotFigure())
+
+    def display(self, displ):
+        self.call_gnuplot(svg=True, ext="_png.gp")
+        fn = "{}{}".format(self.filename, ".png")
+        displ(fn)
 
     @property
     def n_sub_figs(self):
@@ -694,9 +777,15 @@ class GnuplotMultiplot(GnuplotScript):
             l = getattr(f, name)
             setattr(l, "visible", vis_map[i])
 
-    def _repr_svg_(self):
+#    def _repr_svg_(self):
+#        # TODO build a svg variant of the figure
+#        self.write_file()
+#        return super(GnuplotMultiplot, self)._repr_svg_()
+
+    def _repr_png_(self):
+        # TODO build a svg variant of the figure
         self.write_file()
-        return super(GnuplotMultiplot, self)._repr_svg_()
+        return super(GnuplotMultiplot, self)._repr_png_()
 
 
     def write_file(self):
@@ -706,20 +795,32 @@ class GnuplotMultiplot(GnuplotScript):
         if self.style:
             self.style(self)
 
-        # with open(self.filename + "-svg.gp", 'w+') as f:
-        fn = os.path.basename(self.filename)
-        x, y = self.compute_fig_size_px()
-        opts = self.rcParams['svg_terminal_options']
-        self.script = self.text()
-        self.write_script_to_file(self.header(".svg").format(x, y, opts, fn))
-        self.call_gnuplot()
-
         # Export to eps
         x, y = self.compute_fig_size_cm()
         fn = os.path.basename(self.filename)
         opts = self.rcParams['eps_terminal_options']
-        self.write_script_to_file(self.header(".eps").format(x, y, opts, fn))
+        self.script = self.text(svg=False)
+        self.write_script_to_file(self.header(".eps").format(x, y, opts, fn), "_eps.gp")
         self.call_gnuplot()
+        self.reset_ctrs()
+
+        # with open(self.filename + "-svg.gp", 'w+') as f:
+        fn = os.path.basename(self.filename)
+        x, y = self.compute_fig_size_px()
+        opts = self.rcParams['svg_terminal_options']
+        self.script = self.text(svg=True)
+        self.write_script_to_file(self.header(".svg").format(x, y, opts, fn), "_svg.gp")
+        self.call_gnuplot(svg=True)
+        self.reset_ctrs()
+
+        # Export to png
+        fn = os.path.basename(self.filename)
+        x, y = self.compute_fig_size_px()
+        opts = self.rcParams['png_terminal_options']
+        self.script = self.text(svg=True)
+        self.write_script_to_file(self.header(".png").format(x, y, opts, fn), "_png.gp")
+        self.call_gnuplot(svg=True)
+        self.reset_ctrs()
 
     def compute_fig_size_px(self):
         """
@@ -730,8 +831,9 @@ class GnuplotMultiplot(GnuplotScript):
             y = min(self.rcParams['figure_height_px']*ny,
                     self.rcParams['max_canvas_height_px'])
         """
+        heighIncr = 0 if not self.title else 20
         return (self.rcParams['max_canvas_width_px'],
-                self.rcParams['max_canvas_height_px'])
+                self.rcParams['max_canvas_height_px'] + heighIncr)
 
 
     def compute_fig_size_cm(self):
@@ -749,9 +851,9 @@ class GnuplotMultiplot(GnuplotScript):
                     self.rcParams['max_canvas_height_cm'])
         return x, y
         """
+        heighIncr = 0 if not self.title else 0.5
         return (self.rcParams['max_canvas_width_cm'],
-                self.rcParams['max_canvas_height_cm'])
-
+                self.rcParams['max_canvas_height_cm'] + heighIncr)
 
 
     def transpose(self):
@@ -765,11 +867,14 @@ class GnuplotMultiplot(GnuplotScript):
         if ext == ".svg":
             font = "fname '{}'".format(rcParams['svg_font'])
             return "set terminal svg enhanced size {}, {} {}" + font + "\nset output '{}.svg'\n"
+        if ext == ".png":
+            # font = "fname '{}'".format(rcParams['svg_font'])
+            return "set terminal png enhanced size {}, {} {}" + "\nset output '{}.png'\n"
         if ext == ".eps":
             # return "set terminal epslatex color size {}cm, 5.75cm \nset out '{}.eps'\n"
-            return "set terminal epslatex size {}cm, {}cm {}\nset out '{}.eps'\n"
+            return "set terminal epslatex size {}cm, {}cm {}\nset out '{}_eps.eps'\n"
 
-    def text(self):
+    def text(self, svg=False):
         data = self.data
         n_sub_figs = self.n_sub_figs
         body = ""
@@ -778,12 +883,19 @@ class GnuplotMultiplot(GnuplotScript):
             return ("lp" if arg == "line" else "p")
 
 
+        if self.title:
+            # increase top margin to fit a title
+            self.rcParams["canvas_tmargin"] = str(
+                    float(self.rcParams["canvas_tmargin"]) - 0.05)
+
         margins = ",".join([self.rcParams["canvas_" + _ + "margin"]
                             for _ in 'lrtb'])
 
-        body += ("set multiplot layout {}, {} margins screen {} spacing {}\n"
+        title_str = "" if not self.title else ' title "{}" '.format(self.title)
+        body += ("set multiplot layout {}, {} {} margins screen {} spacing {}\n"
             .format(
                 n_sub_figs[0], n_sub_figs[1],
+                title_str,
                 margins, self.rcParams['spacing'])
             )
 
@@ -812,7 +924,7 @@ class GnuplotMultiplot(GnuplotScript):
             body += ("\nset y2range [{:.4g}: {:.4g}]\n"
                         .format(d.yrange[0], d.yrange[1]))
 
-            body += d.pre_text()
+            body += d.pre_text(svg)
             body += "\nplot "
 
             data_blocks = [e.format(pid) for e in d.ftext()]
@@ -846,7 +958,7 @@ class GnuplotMultiplot(GnuplotScript):
                         if isinstance(z, type(None)) :
                             ret += "{} {}\n".format(x_[j], y_[j])
                         else:
-                            ret += "{} {} {}\n".format(x_[j], y_[j], z[j])
+                            ret += "{} {} {}\n".format(x_[j], y_[j], z.values[j])
                     ret += "EOD\n"
                 except Exception as e:
                     print(e, z)
